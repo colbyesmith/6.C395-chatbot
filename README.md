@@ -36,7 +36,7 @@ pip install -r requirements.txt
    - Make a .env file with `HF_TOKEN=<insert your token here>`
    - Now, log in to Hugging Face in the terminal as well:
    ```bash
-   huggingface-cli login
+   hf auth login 
    ```
 
 3. Choose a base model:
