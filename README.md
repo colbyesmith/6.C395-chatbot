@@ -125,7 +125,7 @@ To deploy your chatbot as a free web interface using Hugging Face Spaces:
    git init
    git add .
    git commit -m "Initial commit"
-   git remote add origin https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
+   git remote add origin git remote add huggingface https://huggingface.co/spaces/phanny/6.C395-chatbot
    git push -u origin main
    ```
 
