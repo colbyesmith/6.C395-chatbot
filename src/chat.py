@@ -37,7 +37,8 @@ class Chatbot:
              User: {user_input}
              Assistant:"
         """
-        pass
+
+        return f"You are a helpful assistant that specializes in finding appropriate substance use and mental health treatment facilities in the Boston area. User: {user_input} Assistant:"
         
     def get_response(self, user_input):
         """
@@ -58,4 +59,11 @@ class Chatbot:
         - Use self.format_prompt() to format the user's input
         - Use self.client to generate responses
         """
-        pass
+        prompt = self.format_prompt(user_input)
+        response = self.client.chat.completions.create(
+            model=self.client.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content
