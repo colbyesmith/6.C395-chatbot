@@ -125,9 +125,9 @@ To deploy your chatbot as a free web interface using Hugging Face Spaces:
    git init
    git add .
    git commit -m "Initial commit"
-   git remote add origin git remote add huggingface https://huggingface.co/spaces/phanny/6.C395-chatbot
-   git push -u origin main
-   ```
+   git remote set-url huggingface https://phanny:YOUR_TOKEN_HERE@huggingface.co/spaces/phanny/6.C395-chatbot
+   git push huggingface student-version:main --force
+```
 
 4. Add your HF_TOKEN to the space as a secret.
    - Go to Files.
