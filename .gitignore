@@ -6,5 +6,7 @@ __pycache__/
 models/
 .gitattributes
 
-./cursor/
+.cursor/
 /data/facilities.csv
+# Binary/large; Hugging Face Spaces rejects binary files in git
+data/National_Directory_SU_2024.xlsx
