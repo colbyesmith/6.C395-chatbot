@@ -5,3 +5,6 @@ __pycache__/
 .ipynb_checkpoints/
 models/
 .gitattributes
+
+./cursor/
+/data/facilities.csv
