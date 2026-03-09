@@ -7,3 +7,5 @@ models/
 .gitattributes
 # Full facilities CSV is too large for git; use HF Dataset (see data/README.md) or local sample
 data/facilities.csv
+# Source Excel is binary/large; download via scripts/download_findtreatment_data.py
+data/National_Directory_SU_2024.xlsx
