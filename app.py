@@ -431,56 +431,124 @@ def _tuples_to_messages(history):
 
 def create_demo():
     chatbot = Chatbot()
-    
-    def chat(message, history):
-        """
-        TODO:Generate a response for the current message in a Gradio chat interface.
-        
-        This function is called by Gradio's ChatInterface every time a user sends a message.
-        You only need to generate and return the assistant's response - Gradio handles the
-        chat display and history management automatically.
 
-        Args:
-            message (str): The current message from the user
-            history (list): List of previous message pairs, where each pair is
-                           [user_message, assistant_message]
-                           Example:
-                           [
-                               ["What schools offer Spanish?", "The Hernandez School..."],
-                               ["Where is it located?", "The Hernandez School is in Roxbury..."]
-                           ]
+    with gr.Blocks(title="SAMHSA Treatment Locator") as demo:
+        gr.Markdown("# SAMHSA Treatment Locator")
+        gr.Markdown(DESCRIPTION)
+        gr.Markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", elem_classes=["disclaimer"])
 
-        Returns:
-            str: The assistant's response to the current message.
+        state = gr.State(DEFAULT_STATE)
 
+        with gr.Row():
+            # Left: Folium (Leaflet) map — scroll over map to zoom, drag to pan
+            with gr.Column(scale=5, min_width=320, elem_classes=["map-pane"]):
+                gr.Markdown("**Map** — scroll over map to zoom, drag to pan. Search in chat to see facilities.")
+                map_html = gr.HTML(
+                    value=_build_map_html([], None),
+                    elem_classes=["map-html"],
+                )
+            # Right: chat
+            with gr.Column(scale=5, min_width=320):
+                gr.Markdown("**Chat** — tell me location, treatment type, and payment.")
+                chat = gr.Chatbot(
+                    label="Conversation",
+                    placeholder="E.g. I'm in Boston, need outpatient treatment with Medicaid.",
+                    height=420,
+                    show_label=False,
+                )
+                facility_dropdown = gr.Dropdown(
+                    choices=[],
+                    value=None,
+                    label="Choose a treatment center (pin updates on map)",
+                    allow_custom_value=False,
+                )
+                with gr.Row():
+                    msg = gr.Textbox(
+                        placeholder="Type a message…",
+                        show_label=False,
+                        container=False,
+                        scale=8,
+                    )
+                    submit_btn = gr.Button("Send", variant="primary", scale=1)
+                gr.Markdown("**Try:**", elem_classes=["try-label"])
+                gr.Examples(
+                    examples=EXAMPLES,
+                    inputs=msg,
+                    label=None,
+                    examples_per_page=6,
+                )
 
-        Note:
-            - Gradio automatically:
-                - Displays the user's message
-                - Displays your returned response
-                - Updates the chat history
-                - Maintains the chat interface
-            - You only need to:
-                - Generate an appropriate response to the current message
-                - Return that response as a string
-        """
-        # TODO: Generate and return response
-        return chatbot.get_response(message)
-    
-    
-    # Create Gradio interface. Customize the interface however you'd like!
-    demo = gr.ChatInterface(
-        chat,
-        title="6.C395",
-        description="Ask me anything about [topic]! Since I am a free tier chatbot, I may give a 503 error when I'm busy. If that happens, please try again a few seconds later.",
-        examples=[
-            "What options are available for someone in my situation?"
-        ]
-    )
-    
+        def _facility_names(facilities):
+            return [f.get("facility_name") or f.get("name") or "Facility" for f in facilities]
+
+        def user_submit(message, history, state):
+            update_id = str(time.time())
+            if not message or not message.strip():
+                facilities = list(state.get("last_results") or [])
+                sel = state.get("selected_facility_name")
+                map_html_out = _build_map_html(facilities, None, update_id, sel)
+                return history, state, "", map_html_out, gr.update(choices=_facility_names(facilities))
+            try:
+                history_tuples = _messages_to_tuples(history)
+                reply, new_state = chatbot.get_response(message, history_tuples, state)
+                new_state = dict(new_state)
+                new_state["selected_facility_name"] = None  # clear selection when new results
+                new_history_tuples = history_tuples + [[message, reply]]
+                new_history_messages = _tuples_to_messages(new_history_tuples)
+                facilities = list(new_state.get("last_results") or [])
+                map_html_out = _build_map_html(facilities, None, update_id, None)
+                return new_history_messages, new_state, "", map_html_out, gr.update(choices=_facility_names(facilities), value=None)
+            except Exception as e:
+                err_msg = str(e)[:200]
+                reply = f"Sorry, something went wrong: {err_msg}"
+                if "token" in err_msg.lower() or "auth" in err_msg.lower():
+                    reply += " Check that HF_TOKEN is set in .env for the chat model."
+                history_tuples = _messages_to_tuples(history)
+                new_history_tuples = history_tuples + [[message, reply]]
+                new_history_messages = _tuples_to_messages(new_history_tuples)
+                facilities = list(state.get("last_results") or [])
+                sel = state.get("selected_facility_name")
+                map_html_out = _build_map_html(facilities, None, update_id, sel)
+                return new_history_messages, state, "", map_html_out, gr.update()
+
+        def on_facility_select(choice, state):
+            if not choice:
+                state = dict(state or {})
+                state["selected_facility_name"] = None
+                facilities = list(state.get("last_results") or [])
+                map_html_out = _build_map_html(facilities, None, str(time.time()), None)
+                return map_html_out, state
+            state = dict(state or {})
+            state["selected_facility_name"] = choice
+            facilities = list(state.get("last_results") or [])
+            map_html_out = _build_map_html(facilities, None, str(time.time()), choice)
+            return map_html_out, state
+
+        submit_btn.click(
+            user_submit,
+            inputs=[msg, chat, state],
+            outputs=[chat, state, msg, map_html, facility_dropdown],
+        )
+        msg.submit(
+            user_submit,
+            inputs=[msg, chat, state],
+            outputs=[chat, state, msg, map_html, facility_dropdown],
+        )
+        facility_dropdown.change(
+            on_facility_select,
+            inputs=[facility_dropdown, state],
+            outputs=[map_html, state],
+        )
+
     return demo
 
 
 if __name__ == "__main__":
+    import inspect
     demo = create_demo()
-    demo.launch()
+    kwargs = {"css": CSS}
+    if hasattr(gr, "themes"):
+        sig = inspect.signature(demo.launch)
+        if "theme" in sig.parameters:
+            kwargs["theme"] = gr.themes.Soft(primary_hue="teal", secondary_hue="slate")
+    demo.launch(**kwargs)
