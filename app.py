@@ -432,7 +432,7 @@ def _tuples_to_messages(history):
 def create_demo():
     chatbot = Chatbot()
 
-    with gr.Blocks(title="SAMHSA Treatment Locator") as demo:
+    with gr.Blocks(title="SAMHSA Treatment Locator", css=CSS) as demo:
         gr.Markdown("# SAMHSA Treatment Locator")
         gr.Markdown(DESCRIPTION)
         gr.Markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", elem_classes=["disclaimer"])
@@ -450,12 +450,15 @@ def create_demo():
             # Right: chat
             with gr.Column(scale=5, min_width=320):
                 gr.Markdown("**Chat** — tell me location, treatment type, and payment.")
-                chat = gr.Chatbot(
-                    label="Conversation",
-                    placeholder="E.g. I'm in Boston, need outpatient treatment with Medicaid.",
-                    height=420,
-                    show_label=False,
-                )
+                _chat_kw = {
+                    "label": "Conversation",
+                    "placeholder": "E.g. I'm in Boston, need outpatient treatment with Medicaid.",
+                    "height": 420,
+                    "show_label": False,
+                }
+                if "type" in __import__("inspect").signature(gr.Chatbot).parameters:
+                    _chat_kw["type"] = "messages"
+                chat = gr.Chatbot(**_chat_kw)
                 facility_dropdown = gr.Dropdown(
                     choices=[],
                     value=None,
@@ -546,9 +549,8 @@ def create_demo():
 if __name__ == "__main__":
     import inspect
     demo = create_demo()
-    kwargs = {"css": CSS}
-    if hasattr(gr, "themes"):
-        sig = inspect.signature(demo.launch)
-        if "theme" in sig.parameters:
-            kwargs["theme"] = gr.themes.Soft(primary_hue="teal", secondary_hue="slate")
+    sig = inspect.signature(demo.launch)
+    kwargs = {}
+    if "theme" in sig.parameters and hasattr(gr, "themes"):
+        kwargs["theme"] = gr.themes.Soft(primary_hue="teal", secondary_hue="slate")
     demo.launch(**kwargs)
