@@ -2,11 +2,17 @@
 SAMHSA facility data loading and search.
 
 Data story: See data/README.md (source: N-SUMHSS / National Directory; scope and limitations).
+
+Loading: Prefer local data/facilities.csv. On Hugging Face Spaces (or when FACILITIES_DATASET
+is set), load the full CSV from that Dataset repo so the large file is not stored in the Space repo.
 """
 
 import os
 import pandas as pd
 from typing import Any
+
+# Set to "username/dataset-name" to load facilities from a Hugging Face Dataset (e.g. for Spaces).
+FACILITIES_DATASET_ENV = "FACILITIES_DATASET"
 
 # Column mapping: internal names -> CSV columns
 FACILITY_COLUMNS = {
@@ -32,16 +38,47 @@ def _data_path() -> str:
     return os.path.join(base, "data", "facilities.csv")
 
 
-def load_facilities() -> pd.DataFrame:
-    """Load facility CSV; keep rows with non-missing city and state."""
-    path = _data_path()
-    if not os.path.exists(path):
+def _load_facilities_from_dataset(repo_id: str) -> pd.DataFrame:
+    """Load facilities from a Hugging Face Dataset (CSV). Returns DataFrame with same schema as local CSV."""
+    try:
+        from datasets import load_dataset
+    except ImportError:
         return pd.DataFrame()
-    df = pd.read_csv(path)
+    try:
+        full = load_dataset(repo_id, trust_remote_code=False)
+        # Single CSV may be under "train" or the only split (e.g. "train" or default)
+        splits = list(full.keys())
+        split = "train" if "train" in splits else (splits[0] if splits else None)
+        if split is None:
+            return pd.DataFrame()
+        df = full[split].to_pandas()
+    except Exception:
+        return pd.DataFrame()
+    return _filter_facilities_df(df)
+
+
+def _filter_facilities_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep rows with non-missing city and state."""
+    if df.empty:
+        return df
     for col in ["city", "state"]:
         if col in df.columns:
             df = df[df[col].notna() & (df[col].astype(str).str.strip() != "")]
     return df
+
+
+def load_facilities() -> pd.DataFrame:
+    """Load facility data: from HF Dataset if FACILITIES_DATASET is set, else from local data/facilities.csv."""
+    repo_id = os.environ.get(FACILITIES_DATASET_ENV, "").strip()
+    if repo_id:
+        df = _load_facilities_from_dataset(repo_id)
+        if not df.empty:
+            return df
+    path = _data_path()
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    return _filter_facilities_df(df)
 
 
 def search(criteria: dict[str, Any], df: pd.DataFrame | None = None, limit: int = 10) -> list[dict[str, Any]]:

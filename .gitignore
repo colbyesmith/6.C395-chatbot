@@ -5,3 +5,5 @@ __pycache__/
 .ipynb_checkpoints/
 models/
 .gitattributes
+# Full facilities CSV is too large for git; use HF Dataset (see data/README.md) or local sample
+data/facilities.csv
