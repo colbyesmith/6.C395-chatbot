@@ -43,7 +43,11 @@ pip install -r requirements.txt
    - In config.py, set the BASE_MODEL variable to your base model of choice from HuggingFace.
    - Keep in mind it's better to have a small, lightweight model if you plan on finetuning.
 
-
+4. **Use all FindTreatment.gov data (optional):** The app loads facilities from `data/facilities.csv`. By default the repo may include a small sample. To use the full dataset (same as [FindTreatment.gov](https://findtreatment.gov)), run:
+   ```bash
+   python scripts/download_findtreatment_data.py
+   ```
+   This downloads the official SAMHSA National Directory and builds `data/facilities.csv`. Requires `openpyxl` (in `requirements.txt`).
 
 ## Repository Organization
 
