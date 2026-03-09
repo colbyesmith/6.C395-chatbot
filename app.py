@@ -455,7 +455,10 @@ def create_demo():
                     placeholder="E.g. I'm in Boston, need outpatient treatment with Medicaid.",
                     height=420,
                     show_label=False,
+<<<<<<< HEAD
                     type="messages",
+=======
+>>>>>>> 0a598838908df01b11f79260d68294d8085416f1
                 )
                 facility_dropdown = gr.Dropdown(
                     choices=[],
@@ -545,6 +548,7 @@ def create_demo():
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     import inspect
     demo = create_demo()
     kwargs = {"css": CSS}
@@ -553,3 +557,10 @@ if __name__ == "__main__":
         if "theme" in sig.parameters:
             kwargs["theme"] = gr.themes.Soft(primary_hue="teal", secondary_hue="slate")
     demo.launch(**kwargs)
+=======
+    demo = create_demo()
+    demo.launch(
+        theme=gr.themes.Soft(primary_hue="teal", secondary_hue="slate"),
+        css=CSS,
+    )
+>>>>>>> 0a598838908df01b11f79260d68294d8085416f1
