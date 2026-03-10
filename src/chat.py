@@ -281,12 +281,23 @@ class Chatbot:
             max_tokens=800,
             temperature=0.5,
         )
-        reply = (response.choices[0].message.content or "").strip()
+        raw = response.choices[0].message.content
+        if isinstance(raw, list):
+            reply = "".join(
+                (b.get("text", "") if isinstance(b, dict) else str(b))
+                for b in raw
+            ).strip()
+        else:
+            reply = (raw or "").strip()
+
+        # Return a copy of last_results so Gradio state updates reliably (map re-renders)
+        results_for_state = list(last_results) if last_results else []
+        detail_for_state = dict(last_facility_detail) if isinstance(last_facility_detail, dict) else last_facility_detail
 
         new_state = {
-            "criteria": criteria,
-            "last_results": last_results,
-            "last_facility_detail": last_facility_detail,
+            "criteria": dict(criteria),
+            "last_results": results_for_state,
+            "last_facility_detail": detail_for_state,
             "selected_facility_name": selected_facility_name,
         }
         return reply, new_state

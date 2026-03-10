@@ -46,6 +46,9 @@ CITY_COORDS = {
     "roxbury": (42.33, -71.08),
     "allston": (42.35, -71.13),
     "amesbury": (42.86, -70.93),
+    "athol": (42.59, -72.23),
+    "abilene": (32.45, -99.73),
+    "addison": (32.96, -96.83),
     "austin": (30.27, -97.74),
     "san antonio": (29.42, -98.49),
     "san francisco": (37.77, -122.42),
@@ -53,6 +56,38 @@ CITY_COORDS = {
     "lake view terrace": (34.27, -118.37),
     "chicago": (41.88, -87.63),
 }
+
+
+def _normalize_facility(f):
+    """Ensure facility dict from state or search has string values and expected keys. Accepts any key casing."""
+    if not f or not isinstance(f, dict):
+        return None
+    # Case-insensitive key lookup (state/JSON may use different casing)
+    key_map = {k.lower(): k for k in f.keys() if isinstance(k, str)}
+    def get_any(*names):
+        for n in names:
+            k = n.lower()
+            if k in key_map:
+                val = f.get(key_map[k])
+                if val is not None and str(val).strip() and str(val).lower() != "nan":
+                    return str(val).strip()
+        return None
+    city = get_any("city", "City")
+    state = get_any("state", "State")
+    if not city and not state:
+        return None
+    out = {"city": city or "", "state": state or ""}
+    for name, out_key in (
+        ("facility_name", "facility_name"), ("name", "facility_name"),
+        ("address", "address"), ("phone", "phone"),
+        ("treatment_type", "treatment_type"), ("services", "services"),
+    ):
+        val = get_any(name)
+        if val:
+            out[out_key] = val
+    if "facility_name" not in out:
+        out["facility_name"] = get_any("facility_name", "name") or "Facility"
+    return out
 # Geocode cache so any city/state from search results can be shown on the map.
 _GEOCODE_CACHE = {}
 # Show all proposed facilities (chat returns up to 5; allow more for geocoding).
@@ -202,7 +237,8 @@ def _get_facility_coords(facilities):
     result = []
     geocode_count = [0]
     for f in facilities:
-        if not isinstance(f, dict):
+        f = _normalize_facility(f)
+        if not f:
             continue
         coord = _facility_coord(f, geocode_count)
         if coord:
@@ -224,11 +260,11 @@ def _build_google_map_html(facilities, force_update_id=None, selected_facility_n
             center_lon = sum(lons) / len(lons)
             zoom = 10
         markers_data = []
-        for lat, lon, f in facility_coords:
+        for i, (lat, lon, f) in enumerate(facility_coords):
             name = (f.get("facility_name") or f.get("name") or "Facility").replace("<", "&lt;").replace(">", "&gt;")
             info = _popup_html(f)
             sel = selected_facility_name and (f.get("facility_name") or f.get("name") or "") == selected_facility_name
-            markers_data.append({"lat": lat, "lng": lon, "name": name, "info": info, "selected": sel})
+            markers_data.append({"lat": lat, "lng": lon, "name": name, "info": info, "selected": sel, "label": str(i + 1)})
         # Base64-encode markers so srcdoc HTML escaping cannot break the JSON
         markers_json = json.dumps(markers_data)
         markers_b64 = base64.b64encode(markers_json.encode("utf-8")).decode("ascii")
@@ -246,10 +282,8 @@ function init() {{
   if (markersData && markersData.length) {{
     markersData.forEach(function(m) {{
       var pos = {{ lat: m.lat, lng: m.lng }};
-      var opts = {{ position: pos, map: map, title: m.name }};
-      if (m.selected) {{
-        opts.icon = {{ path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: "#c62828", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 3 }};
-      }}
+      var opts = {{ position: pos, map: map, title: m.name, label: {{ text: m.label || "", color: "white", fontWeight: "bold" }} }};
+      if (m.selected) {{ opts.animation = google.maps.Animation.BOUNCE; opts.label = {{ text: "★", color: "white", fontWeight: "bold" }}; }}
       var marker = new google.maps.Marker(opts);
       marker.addListener("click", function() {{ infowindow.setContent(m.info); infowindow.open(map, marker); }});
       if (!bounds) bounds = new google.maps.LatLngBounds(pos, pos);
@@ -333,13 +367,22 @@ def _build_folium_map_html(facilities, user_location_str=None, force_update_id=N
             if route:
                 folium.PolyLine(route, color="teal", weight=4, opacity=0.8).add_to(m)
 
-        for (lat, lon), f in facility_coords:
+        for i, ((lat, lon), f) in enumerate(facility_coords):
             is_selected = selected_facility_name and (f.get("facility_name") or f.get("name") or "") == selected_facility_name
-            folium.Marker(
-                [lat, lon],
+            name = f.get("facility_name") or f.get("name") or "Facility"
+            tooltip = f"{i + 1}. {name}"
+            color = "#c62828" if is_selected else "#319795"
+            fill_color = "#e53935" if is_selected else "#26a69a"
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=12,
                 popup=folium.Popup(_popup_html(f), max_width=280),
-                tooltip=f.get("facility_name") or f.get("name") or "Facility",
-                icon=folium.Icon(color="red" if is_selected else "green", icon="star" if is_selected else "plus-sign"),
+                tooltip=tooltip,
+                color=color,
+                fill=True,
+                fill_color=fill_color,
+                fill_opacity=0.9,
+                weight=2,
             ).add_to(m)
 
         # Center and zoom to show all proposed locations
@@ -371,9 +414,13 @@ def _build_folium_map_html(facilities, user_location_str=None, force_update_id=N
             f'Map could not be loaded. ({str(e)[:80]})</div>'
         )
 
-DISCLAIMER = (
-    "**Disclaimer:** Information is from SAMHSA data. Always verify with the facility or "
-    "[findtreatment.gov](https://findtreatment.gov) before making decisions. This tool does not endorse any facility."
+DISCLAIMER_HTML = (
+    '<div class="disclaimer">'
+    '<p class="disclaimer-title">Disclaimer</p>'
+    '<p class="disclaimer-text">Information is from SAMHSA data. Always verify with the facility or '
+    '<a href="https://findtreatment.gov" target="_blank" rel="noopener">findtreatment.gov</a> '
+    'before making decisions. This tool does not endorse any facility.</p>'
+    '</div>'
 )
 
 DESCRIPTION = (
@@ -388,7 +435,35 @@ EXAMPLES = [
 ]
 
 CSS = """
-.disclaimer { font-size: 0.85em; color: #555; padding: 0.5rem 0.75rem; background: #f8f9fa; border-radius: 8px; margin-bottom: 0.75rem; }
+.disclaimer {
+  font-size: 0.9rem;
+  color: #2d3748;
+  padding: 0.875rem 1rem;
+  background: #e2e8f0;
+  border-radius: 10px;
+  margin-bottom: 0.75rem;
+  border-left: 4px solid #319795;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.disclaimer-title {
+  font-weight: 600;
+  color: #1a202c;
+  margin: 0 0 0.35em 0;
+  font-size: 0.95em;
+}
+.disclaimer-text {
+  margin: 0;
+  line-height: 1.5;
+  color: #2d3748;
+}
+.disclaimer a {
+  color: #2c7a7b;
+  text-decoration: none;
+  font-weight: 600;
+}
+.disclaimer a:hover {
+  text-decoration: underline;
+}
 .map-pane { padding: 0.25rem 0 0 0; }
 .map-pane .map-html { border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 .map-pane iframe { border-radius: 12px; }
@@ -435,7 +510,7 @@ def create_demo():
     with gr.Blocks(title="SAMHSA Treatment Locator") as demo:
         gr.Markdown("# SAMHSA Treatment Locator")
         gr.Markdown(DESCRIPTION)
-        gr.Markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", elem_classes=["disclaimer"])
+        gr.HTML(DISCLAIMER_HTML)
 
         state = gr.State(DEFAULT_STATE)
 
@@ -459,12 +534,6 @@ def create_demo():
                 if "type" in __import__("inspect").signature(gr.Chatbot).parameters:
                     _chat_kw["type"] = "messages"
                 chat = gr.Chatbot(**_chat_kw)
-                facility_dropdown = gr.Dropdown(
-                    choices=[],
-                    value=None,
-                    label="Choose a treatment center (pin updates on map)",
-                    allow_custom_value=False,
-                )
                 with gr.Row():
                     msg = gr.Textbox(
                         placeholder="Type a message…",
@@ -481,16 +550,13 @@ def create_demo():
                     examples_per_page=6,
                 )
 
-        def _facility_names(facilities):
-            return [f.get("facility_name") or f.get("name") or "Facility" for f in facilities]
-
         def user_submit(message, history, state):
             update_id = str(time.time())
             if not message or not message.strip():
                 facilities = list(state.get("last_results") or [])
                 sel = state.get("selected_facility_name")
                 map_html_out = _build_map_html(facilities, None, update_id, sel)
-                return history, state, "", map_html_out, gr.update(choices=_facility_names(facilities))
+                return history, state, "", map_html_out
             try:
                 history_tuples = _messages_to_tuples(history)
                 reply, new_state = chatbot.get_response(message, history_tuples, state)
@@ -500,8 +566,7 @@ def create_demo():
                 facilities = list(new_state.get("last_results") or [])
                 sel = new_state.get("selected_facility_name")
                 map_html_out = _build_map_html(facilities, None, update_id, sel)
-                dropdown_value = sel if sel and any(f.get("facility_name") == sel or f.get("name") == sel for f in facilities) else None
-                return new_history_messages, new_state, "", map_html_out, gr.update(choices=_facility_names(facilities), value=dropdown_value)
+                return new_history_messages, new_state, "", map_html_out
             except Exception as e:
                 err_msg = str(e)[:200]
                 reply = f"Sorry, something went wrong: {err_msg}"
@@ -513,35 +578,17 @@ def create_demo():
                 facilities = list(state.get("last_results") or [])
                 sel = state.get("selected_facility_name")
                 map_html_out = _build_map_html(facilities, None, update_id, sel)
-                return new_history_messages, state, "", map_html_out, gr.update()
-
-        def on_facility_select(choice, state):
-            if not choice:
-                state = dict(state or {})
-                state["selected_facility_name"] = None
-                facilities = list(state.get("last_results") or [])
-                map_html_out = _build_map_html(facilities, None, str(time.time()), None)
-                return map_html_out, state
-            state = dict(state or {})
-            state["selected_facility_name"] = choice
-            facilities = list(state.get("last_results") or [])
-            map_html_out = _build_map_html(facilities, None, str(time.time()), choice)
-            return map_html_out, state
+                return new_history_messages, state, "", map_html_out
 
         submit_btn.click(
             user_submit,
             inputs=[msg, chat, state],
-            outputs=[chat, state, msg, map_html, facility_dropdown],
+            outputs=[chat, state, msg, map_html],
         )
         msg.submit(
             user_submit,
             inputs=[msg, chat, state],
-            outputs=[chat, state, msg, map_html, facility_dropdown],
-        )
-        facility_dropdown.change(
-            on_facility_select,
-            inputs=[facility_dropdown, state],
-            outputs=[map_html, state],
+            outputs=[chat, state, msg, map_html],
         )
 
     return demo
