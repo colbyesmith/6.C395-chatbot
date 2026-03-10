@@ -432,7 +432,7 @@ def _tuples_to_messages(history):
 def create_demo():
     chatbot = Chatbot()
 
-    with gr.Blocks(title="SAMHSA Treatment Locator", css=CSS) as demo:
+    with gr.Blocks(title="SAMHSA Treatment Locator") as demo:
         gr.Markdown("# SAMHSA Treatment Locator")
         gr.Markdown(DESCRIPTION)
         gr.Markdown(f"<div class='disclaimer'>{DISCLAIMER}</div>", elem_classes=["disclaimer"])
@@ -495,12 +495,13 @@ def create_demo():
                 history_tuples = _messages_to_tuples(history)
                 reply, new_state = chatbot.get_response(message, history_tuples, state)
                 new_state = dict(new_state)
-                new_state["selected_facility_name"] = None  # clear selection when new results
                 new_history_tuples = history_tuples + [[message, reply]]
                 new_history_messages = _tuples_to_messages(new_history_tuples)
                 facilities = list(new_state.get("last_results") or [])
-                map_html_out = _build_map_html(facilities, None, update_id, None)
-                return new_history_messages, new_state, "", map_html_out, gr.update(choices=_facility_names(facilities), value=None)
+                sel = new_state.get("selected_facility_name")
+                map_html_out = _build_map_html(facilities, None, update_id, sel)
+                dropdown_value = sel if sel and any(f.get("facility_name") == sel or f.get("name") == sel for f in facilities) else None
+                return new_history_messages, new_state, "", map_html_out, gr.update(choices=_facility_names(facilities), value=dropdown_value)
             except Exception as e:
                 err_msg = str(e)[:200]
                 reply = f"Sorry, something went wrong: {err_msg}"
@@ -551,6 +552,8 @@ if __name__ == "__main__":
     demo = create_demo()
     sig = inspect.signature(demo.launch)
     kwargs = {}
+    if "css" in sig.parameters:
+        kwargs["css"] = CSS
     if "theme" in sig.parameters and hasattr(gr, "themes"):
         kwargs["theme"] = gr.themes.Soft(primary_hue="teal", secondary_hue="slate")
     demo.launch(**kwargs)

@@ -200,6 +200,10 @@ def search(criteria: dict[str, Any], df: pd.DataFrame | None = None, limit: int 
             return t in svc or t in desc
         out = out[out.apply(has_therapy, axis=1)]
 
+    # Stable order so map pins and model's "1. 2. 3." list match
+    sort_cols = [c for c in ("state", "city", "facility_name") if c in out.columns]
+    if sort_cols:
+        out = out.sort_values(by=sort_cols, na_position="last").reset_index(drop=True)
     out = out.head(limit)
     return out.to_dict(orient="records")
 

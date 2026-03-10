@@ -26,8 +26,8 @@ SYSTEM_PROMPT = """You are a supportive, non-judgmental assistant that helps peo
 
 Conversation flow:
 1. Greet / clarify: If the user has not yet given a location (state or city), ask for: (a) state or city, (b) treatment type (inpatient, outpatient, residential, telehealth), (c) payment (insurance, Medicaid/MassHealth, sliding scale, free), and as appropriate: substances they're concerned about (e.g. alcohol, opioids), special populations (veterans, LGBTQ+, adolescents, pregnant women), therapies (e.g. MAT, CBT, 12-step), and languages spoken. Do not search until you have at least a location.
-2. First results: When you have at least location (and ideally type and payment), present 2–3 facilities by name with 1–2 sentence descriptions using ONLY the data in the "Current facility data" section below. Mention relevant attributes (payment, languages, populations, substances, therapies) when they match what the user asked for. Offer to give more details or other options.
-3. Follow-up: If the user asks about a specific facility (e.g. "Do they offer MAT?" or "Tell me about Boston Medical Center"), answer ONLY from the facility record provided. Offer next steps (e.g. how to contact).
+2. First results: When you have at least location (and ideally type and payment), present 2–3 facilities by name with 1–2 sentence descriptions using ONLY the data in the "Current facility data" section below. For each facility, always include the phone number when available so the user can call; include address when helpful. Mention relevant attributes (payment, languages, populations, substances, therapies) when they match what the user asked for. Offer to give more details or other options.
+3. Follow-up: If the user asks about a specific facility (e.g. "Do they offer MAT?" or "Tell me about Boston Medical Center"), answer ONLY from the facility record provided. When they ask how to contact or for details, give the phone number and address from the data. Offer next steps (e.g. "You can call them at [phone]").
 4. Closing: If the user thanks you or says they're done, give a brief supportive close and invite them to return.
 
 Rules:
@@ -36,6 +36,7 @@ Rules:
 - Keep responses concise and actionable.
 - Be supportive and clear. Do not give medical advice.
 - If no location has been provided, ask for location before suggesting any facilities.
+- When listing or describing a facility, always include contact info from the data: phone number (when present) and address so the user can reach them.
 """
 
 
@@ -146,16 +147,36 @@ def _format_facilities_for_prompt(facilities: list[dict]) -> str:
         addr = f.get("address", "")
         city = f.get("city", "")
         state = f.get("state", "")
-        phone = f.get("phone", "")
+        phone = (f.get("phone") or "").strip() or (f.get("phone_number") or "").strip()
         mat = f.get("mat", "")
         services = f.get("services", "")
-        parts = [f"{i}. {name} — {desc} Address: {addr}, {city}, {state}. Phone: {phone}. MAT: {mat}. Services: {services}."]
+        contact = f"Phone: {phone}. " if phone else "(No phone in data). "
+        contact += f"Address: {addr}, {city}, {state}." if (addr or city or state) else ""
+        parts = [f"{i}. {name} — {desc} Contact: {contact} MAT: {mat}. Services: {services}."]
         for key, label in (("payment_options", "Payment"), ("substances_addressed", "Substances"), ("languages", "Languages"), ("populations", "Populations")):
             val = f.get(key, "")
             if val and str(val).strip():
                 parts.append(f" {label}: {val}.")
         lines.append("".join(parts))
     return "\n".join(lines)
+
+
+def _detect_numeric_facility_selection(text: str, last_results: list[dict]) -> int | None:
+    """If user is selecting by number (1, 2, 3, '1.', 'option 1', 'the first one'), return 1-based index or None."""
+    if not last_results or not text or not text.strip():
+        return None
+    text_lower = text.strip().lower()
+    # "1", "1.", "option 1", "the first one", "number 1"
+    for i in range(1, min(len(last_results) + 1, 10)):
+        if text_lower in (str(i), f"{i}.", f"option {i}", f"number {i}"):
+            return i
+        if i == 1 and text_lower in ("first", "the first", "the first one"):
+            return 1
+        if i == 2 and text_lower in ("second", "the second one"):
+            return 2
+        if i == 3 and text_lower in ("third", "the third one"):
+            return 3
+    return None
 
 
 def _detect_facility_mention(text: str, last_results: list[dict]) -> str | None:
@@ -206,30 +227,43 @@ class Chatbot:
         criteria = state.get("criteria", {})
         last_results = state.get("last_results", [])
         last_facility_detail = state.get("last_facility_detail")
+        selected_facility_name = state.get("selected_facility_name")
 
         # Extract criteria from current message and merge
         new_criteria = _extract_criteria(message)
         criteria = _merge_criteria(criteria, new_criteria)
 
-        # Check if user is asking about a specific facility (follow-up)
-        facility_mention = _detect_facility_mention(message, last_results)
-        if facility_mention:
-            single = get_facility_by_name(facility_mention, self._get_df())
-            if single:
-                last_facility_detail = single
-                context_data = "Current facility data (use ONLY this for your answer):\n" + _format_facilities_for_prompt([single])
-            else:
-                context_data = "No matching facility found in data. Say you don't have details for that facility and offer to search again or clarify."
+        # Check if user is selecting by number (e.g. "1.", "2") — use existing last_results, don't re-run search
+        num_sel = _detect_numeric_facility_selection(message, last_results)
+        if num_sel is not None and 1 <= num_sel <= len(last_results):
+            chosen = last_results[num_sel - 1]
+            last_facility_detail = chosen
+            selected_facility_name = chosen.get("facility_name") or chosen.get("name")
+            context_data = "Current facility data (use ONLY this for your answer):\n" + _format_facilities_for_prompt([chosen])
         else:
-            last_facility_detail = None
-            # Run search when we have at least location
-            has_location = bool(criteria.get("state") or criteria.get("location"))
-            if has_location:
-                results = search(criteria, df=self._get_df(), limit=5)
-                last_results = results
-                context_data = "Current facility data (suggest ONLY these; do not invent any other facility):\n" + _format_facilities_for_prompt(results)
+            # Check if user is asking about a specific facility by name
+            facility_mention = _detect_facility_mention(message, last_results)
+            if facility_mention:
+                single = get_facility_by_name(facility_mention, self._get_df())
+                if single:
+                    last_facility_detail = single
+                    selected_facility_name = single.get("facility_name") or single.get("name")
+                    context_data = "Current facility data (use ONLY this for your answer):\n" + _format_facilities_for_prompt([single])
+                else:
+                    context_data = "No matching facility found in data. Say you don't have details for that facility and offer to search again or clarify."
+                    last_facility_detail = None
             else:
-                context_data = "No search has been run yet (user has not provided a location). Ask for state or city, and optionally treatment type, payment, substances, populations, therapies, and languages, before suggesting facilities."
+                last_facility_detail = None
+                selected_facility_name = None
+                # Run search when we have at least location
+                has_location = bool(criteria.get("state") or criteria.get("location"))
+                if has_location:
+                    results = search(criteria, df=self._get_df(), limit=5)
+                    last_results = results
+                    context_data = "Current facility data (suggest ONLY these; do not invent any other facility):\n" + _format_facilities_for_prompt(results)
+                else:
+                    context_data = "No search has been run yet (user has not provided a location). Ask for state or city, and optionally treatment type, payment, substances, populations, therapies, and languages, before suggesting facilities."
+                    selected_facility_name = state.get("selected_facility_name")  # preserve when no search
 
         # Build messages for API: system (with context) + history + current user
         system_content = SYSTEM_PROMPT + "\n\n" + context_data
@@ -253,5 +287,6 @@ class Chatbot:
             "criteria": criteria,
             "last_results": last_results,
             "last_facility_detail": last_facility_detail,
+            "selected_facility_name": selected_facility_name,
         }
         return reply, new_state
